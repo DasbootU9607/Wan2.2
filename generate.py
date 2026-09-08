@@ -17,6 +17,7 @@ from PIL import Image
 import wan
 from wan.configs import MAX_AREA_CONFIGS, SIZE_CONFIGS, SUPPORTED_SIZES, WAN_CONFIGS
 from wan.distributed.util import init_distributed_group
+from wan.prompt_relay import build_prompt_text
 from wan.utils.prompt_extend import DashScopePromptExpander, QwenPromptExpander
 from wan.utils.utils import merge_video_audio, save_video, str2bool
 
@@ -65,17 +66,16 @@ def _validate_args(args):
     assert args.task in WAN_CONFIGS, f"Unsupport task: {args.task}"
     assert args.task in EXAMPLE_PROMPT, f"Unsupport task: {args.task}"
 
-    if args.prompt is None:
-         ########## Prompt Relay (Replace prompt if prompt_filepath json is provided) ########## 
-        if args.prompt_filepath is not None:
-            import json
-            with open(args.prompt_filepath, 'r') as f:
-                prompt_data = json.load(f)
-            full_prompt = prompt_data.get("global_prompt", "")
-            local_prompts = prompt_data.get("local_prompts", [])
-            args.prompt = full_prompt + " ".join(local_prompts)
-        else:
-            args.prompt = EXAMPLE_PROMPT[args.task]["prompt"]
+    if args.prompt_filepath is not None:
+        if args.task != "t2v-A14B":
+            raise ValueError("Prompt Relay JSON is supported for t2v-A14B only.")
+        if args.use_prompt_extend:
+            raise ValueError("Disable prompt extension when using Prompt Relay JSON to preserve token routing.")
+        import json
+        with open(args.prompt_filepath, 'r', encoding='utf-8') as f:
+            args.prompt = build_prompt_text(json.load(f))
+    elif args.prompt is None:
+        args.prompt = EXAMPLE_PROMPT[args.task]["prompt"]
     if args.image is None and "image" in EXAMPLE_PROMPT[args.task]:
         args.image = EXAMPLE_PROMPT[args.task]["image"]
     if args.audio is None and args.enable_tts is False and "audio" in EXAMPLE_PROMPT[args.task]:
@@ -121,7 +121,7 @@ def _parse_args():
         "--prompt_filepath",
         type=str,
         default=None,
-        help="The file of the input prompts containing the timesteps for each prompt."
+        help="T2V Prompt Relay JSON: local prompts with optional segment_lengths or overlapping segment_intervals."
     )
     ################################################## 
 

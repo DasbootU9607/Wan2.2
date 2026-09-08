@@ -1,0 +1,11 @@
+{
+  "global_prompt": "A single continuous cinematic wide shot outside a bank. A robber and a parked getaway car are in the foreground; the bank is behind them.",
+  "local_prompts": [
+    "The robber exits the bank, runs toward the getaway car, opens its door and climbs inside.",
+    "Behind the robber and the car, an explosion erupts from the bank entrance, throwing smoke and debris into the air."
+  ],
+  "segment_intervals": [[0.0, 3.0], [2.0, 4.0]],
+  "time_unit": "seconds",
+  "tail_width": 0.5,
+  "epsilon": 0.001
+}

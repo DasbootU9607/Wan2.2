@@ -24,6 +24,7 @@ from .distributed.util import get_world_size
 from .modules.model import WanModel
 from .modules.t5 import T5EncoderModel
 from .modules.vae2_1 import Wan2_1_VAE
+from .prompt_relay import prepare_prompt_relay
 from .utils.fm_solvers import (
     FlowDPMSolverMultistepScheduler,
     get_sampling_sigmas,
@@ -205,99 +206,19 @@ class WanT2V:
         return getattr(self, required_model_name)
 
 
-    def _prepare_prompts(self, global_prompt, local_prompts, segment_lengths, frame_num, size):
-        
-        ########## Prompt Relay  ########## 
-        tokenizer = self.text_encoder.tokenizer
+    def _prepare_prompts(self, global_prompt, local_prompts, segment_lengths,
+                         frame_num, size, prompt_config=None):
+        config = prompt_config if prompt_config is not None else dict(
+            global_prompt=global_prompt, local_prompts=local_prompts,
+            segment_lengths=segment_lengths)
+        payload, text = prepare_prompt_relay(
+            config, self.text_encoder.tokenizer, frame_num, size,
+            self.vae_stride, self.patch_size, self.config.sample_fps)
+        if payload:
+            logging.info("Prompt Relay internal intervals [start, end): %s; export FPS: %s",
+                         [entry["frame_interval"] for entry in payload], self.config.sample_fps)
+        return payload, text
 
-        latent_frames = (frame_num - 1) // self.vae_stride[0] + 1
-        width, height = size
-        h_lat = int(height) // self.vae_stride[1]
-        w_lat = int(width) // self.vae_stride[2]
-        h_patches = h_lat // self.patch_size[1]
-        w_patches = w_lat // self.patch_size[2]
-        tokens_per_frame = int(h_patches) * int(w_patches)
-
-        full_prompt = global_prompt + "".join(local_prompts)
-        
-        full_ids = tokenizer(full_prompt, add_special_tokens=True, padding=False, return_mask=False)[0].tolist()
-        def sentence_to_token_indices(subsentences):
-            #returns token indices per local prompt
-            def find_subsequence(haystack, needle):
-                #Return the start and end index
-                for start in range(len(haystack) - len(needle) + 1):
-                    if haystack[start: start + len(needle)] == needle: 
-                        return (start, start + len(needle))
-                
-            token_indices = {}
-            for subsentence in subsentences:
-                sub_ids = tokenizer(subsentence, padding=False, add_special_tokens=False)[0].tolist()
-                match = find_subsequence(full_ids, sub_ids)
-                if match is None:
-                    raise ValueError(f"Subsentence not found in full prompt: {subsentence}")
-                
-                token_indices[subsentence] = match
-            return token_indices
-
-        def build_q_token_idx(frame_intervals, token_spans, tokens_per_frame):        
-            q_token_idx = []
-            epsilon = 1e-3
-
-            if len(frame_intervals)!=0:
-
-                for _, (frame_start, frame_end, subsentences) in enumerate(frame_intervals): 
-
-                    spans = []
-                    for subsentence in subsentences:
-                        start, end = token_spans[subsentence]
-                        spans.extend(range(start, end))
-
-                    window = (frame_end - frame_start)//2 - 2 # Window size is 2 frames shorter than half the segment length. Shortest window is thus 4 latent frames.
-                  
-                    sigma =  0.1448 #See our derivation in the readme
-                   
-                    payload = {
-                        "window": window,
-                        "sigma": torch.tensor(sigma, dtype=torch.float16),
-                        "midpoint": (frame_start + frame_end) // 2,
-                        "tokens_per_frame": tokens_per_frame,
-                        "local_token_idx": torch.tensor(spans, dtype=torch.long),
-                    }
-                   
-                    q_token_idx.append(payload)
-
-            return q_token_idx
-
-        spans = sentence_to_token_indices(local_prompts)
-        
-        
-        if len(local_prompts) != 0:
-            step = math.ceil(latent_frames / len(local_prompts)) 
-
-            if len(segment_lengths) != 0:
-                frame_intervals = []
-                frame_counter = 0
-                for i, seg_len in enumerate(segment_lengths):
-                    frame_start = frame_counter
-                    frame_end = min(frame_counter + seg_len, latent_frames)
-                    frame_intervals.append((frame_start, frame_end, [local_prompts[i]]))
-                    frame_counter += seg_len
-
-            else:
-                frame_intervals = [(step*i, 
-                                    min(step*(i+1), latent_frames), 
-                                    [local_prompts[i]]) for i in range(len(local_prompts))]
-                
-
-            q_token_idx = build_q_token_idx(frame_intervals = frame_intervals,
-                                                                token_spans = spans,
-                                                                tokens_per_frame = tokens_per_frame,
-                                                                )
-        else:
-            q_token_idx = None
-        return q_token_idx, full_prompt
-
-       
     def generate(self,
                  input_prompt,
                  size=(1280, 720),
@@ -336,9 +257,9 @@ class WanT2V:
                 Random seed for noise generation. If -1, use random seed.
             offload_model (`bool`, *optional*, defaults to True):
                 If True, offloads models to CPU during generation to save VRAM
-            cross_attn_q_token_idx (`list`, *optional*, defaults to None):
-                Optional cross-attention routing config. Each entry is `(q_start, q_end, token_idx_list)` and
-                restricts which text tokens (keys/values) the query slice `[q_start:q_end)` can attend to.
+            prompt_filepath (`str`, *optional*, defaults to None):
+                UTF-8 Prompt Relay JSON with local prompts and optional
+                segment_lengths or independent, possibly overlapping segment_intervals.
 
         Returns:
             torch.Tensor:
@@ -349,21 +270,12 @@ class WanT2V:
                 - W: Frame width from size)
         """
 
+        cross_attn_q_token_idx = None
         if prompt_filepath is not None:
-            ########## Prompt Relay  ########## 
-            with open(prompt_filepath, 'r') as f:
+            with open(prompt_filepath, 'r', encoding='utf-8') as f:
                 prompts = json.load(f)
-        
-                global_prompt = prompts.get("global_prompt", "")
-                local_prompts = prompts.get("local_prompts", [])
-                segment_lengths = prompts.get("segment_lengths", [])
-                local_prompts = [" " + lp for lp in local_prompts]
-
-
-
-                cross_attn_q_token_idx, input_prompt = self._prepare_prompts(global_prompt, local_prompts, segment_lengths, frame_num, size)
-
-
+            cross_attn_q_token_idx, input_prompt = self._prepare_prompts(
+                None, None, None, frame_num, size, prompt_config=prompts)
 
         # preprocess
         guide_scale = (guide_scale, guide_scale) if isinstance(
@@ -451,7 +363,7 @@ class WanT2V:
             arg_c = {
                 'context': context,
                 'seq_len': seq_len,
-                'cross_attn_q_token_idx': None if prompt_filepath is None else cross_attn_q_token_idx
+                'cross_attn_q_token_idx': cross_attn_q_token_idx
             }
             arg_null = {'context': context_null, 'seq_len': seq_len}
 

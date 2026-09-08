@@ -3,6 +3,7 @@ import torch
 import torch.cuda.amp as amp
 
 from ..modules.model import sinusoidal_embedding_1d
+from ..modules.temporal_routing import offset_prompt_relay
 from .ulysses import distributed_attention
 from .util import gather_forward, get_rank, get_world_size
 
@@ -119,7 +120,11 @@ def sp_dit_forward(
         ]))
 
     # Context Parallel
-    x = torch.chunk(x, get_world_size(), dim=1)[get_rank()]
+    chunks = torch.chunk(x, get_world_size(), dim=1)
+    rank = get_rank()
+    cross_attn_q_token_idx = offset_prompt_relay(
+        cross_attn_q_token_idx, sum(chunk.size(1) for chunk in chunks[:rank]))
+    x = chunks[rank]
     e = torch.chunk(e, get_world_size(), dim=1)[get_rank()]
     e0 = torch.chunk(e0, get_world_size(), dim=1)[get_rank()]
 

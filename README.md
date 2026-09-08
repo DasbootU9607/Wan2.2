@@ -1,3 +1,5 @@
+> **Prompt Relay overlap branch (T2V-A14B):** Independent, overlapping time intervals are supported. See [English usage](PROMPT_RELAY.md), [Chinese usage](PROMPT_RELAY_ZH.md), and [example JSON](prompt_relay_overlap.json). Missing times retain consecutive allocation.
+
 # Wan2.2
 
 <p align="center">
