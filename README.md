@@ -1,5 +1,3 @@
-> **Prompt Relay overlap branch (T2V-A14B):** Independent, overlapping time intervals are supported. See [English usage](PROMPT_RELAY.md), [Chinese usage](PROMPT_RELAY_ZH.md), and [example JSON](prompt_relay_overlap.json). Missing times retain consecutive allocation.
-
 # Wan2.2
 
 <p align="center">
@@ -188,6 +186,33 @@ DASH_API_KEY=your_key torchrun --nproc_per_node=8 generate.py  --task t2v-A14B -
 torchrun --nproc_per_node=8 generate.py  --task t2v-A14B --size 1280*720 --ckpt_dir ./Wan2.2-T2V-A14B --dit_fsdp --t5_fsdp --ulysses_size 8 --prompt "Two anthropomorphic cats in comfy boxing gear and bright gloves fight intensely on a spotlighted stage" --use_prompt_extend --prompt_extend_method 'local_qwen' --prompt_extend_target_lang 'zh'
 ```
 
+
+##### (3) Using Prompt Relay with Overlapping Events
+
+The Prompt Relay extension for **T2V-A14B** accepts a JSON file with a global
+prompt, local event descriptions, and independent `segment_intervals`. For
+example, assigning one event to `[0, 3)` seconds and another to `[2, 4)` seconds
+allows both prompts to guide the video during `[2, 3)`.
+
+Use the Wan submodule recorded by the
+[Prompt Relay overlap branch](https://github.com/GordonChen19/Prompt-Relay/tree/wan2.2-overlap-prompt-relay),
+or the standalone
+[`feat/prompt-relay-overlap` branch](https://github.com/DasbootU9607/Wan2.2/tree/feat/prompt-relay-overlap).
+After installing dependencies and downloading the T2V-A14B weights, run:
+
+```sh
+python generate.py --task t2v-A14B --ckpt_dir ./Wan2.2-T2V-A14B \
+  --size "832*480" --frame_num 81 --offload_model True --convert_model_dtype \
+  --prompt_filepath prompt_relay_overlap.json
+```
+
+Keep `--use_prompt_extend` disabled with Prompt Relay JSON so the text continues
+to match its timing schedule. Without `segment_intervals`, events retain the
+original consecutive allocation; this implementation does not infer overlap
+from the text or support `auto_overlap`.
+
+See the [English guide](PROMPT_RELAY.md), [中文说明](PROMPT_RELAY_ZH.md), and
+[example JSON](prompt_relay_overlap.json) for the schema and timing options.
 
 #### Run Image-to-Video Generation
 
@@ -506,4 +531,3 @@ We would like to thank the contributors to the [SD3](https://huggingface.co/stab
 
 ## Contact Us
 If you would like to leave a message to our research or product teams, feel free to join our [Discord](https://discord.gg/AKNgpMK4Yj) or [WeChat groups](https://gw.alicdn.com/imgextra/i2/O1CN01tqjWFi1ByuyehkTSB_!!6000000000015-0-tps-611-1279.jpg)!
-
