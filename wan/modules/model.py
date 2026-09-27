@@ -8,6 +8,7 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 
 from .attention import flash_attention
+from .sliding_window import sliding_window_attention
 from .temporal_routing import build_temporal_cost, chunked_softmax_attention
 
 __all__ = ['WanModel']
@@ -178,7 +179,8 @@ class WanSelfAttention(nn.Module):
         self.norm_q = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.norm_k = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
 
-    def forward(self, x, seq_lens, grid_sizes, freqs, self_attention_map=None):
+    def forward(self, x, seq_lens, grid_sizes, freqs, self_attention_map=None,
+                sliding_window_config=None):
         r"""
         Args:
             x(Tensor): Shape [B, L, num_heads, C / num_heads]
@@ -200,13 +202,17 @@ class WanSelfAttention(nn.Module):
         q = rope_apply(q, grid_sizes, freqs)
         k = rope_apply(k, grid_sizes, freqs)
 
-        # if self_attention_map is None:
-        x = flash_attention(
-            q=q,
-            k=k,
-            v=v,
-            k_lens=seq_lens,
-            window_size=self.window_size)
+        if sliding_window_config is not None:
+            if tuple(self.window_size) != (-1, -1):
+                raise ValueError("Temporal windows cannot be combined with token-local window_size.")
+            x = sliding_window_attention(q, k, v, seq_lens, grid_sizes, sliding_window_config)
+        else:
+            x = flash_attention(
+                q=q,
+                k=k,
+                v=v,
+                k_lens=seq_lens,
+                window_size=self.window_size)
         
         # outs = []
         # for seg in self_attention_map:
@@ -323,6 +329,7 @@ class WanAttentionBlock(nn.Module):
         context_lens,
         cross_attn_q_token_idx=None,
         self_attention_map=None,
+        sliding_window_config=None,
     ):
         r"""
         Args:
@@ -340,7 +347,8 @@ class WanAttentionBlock(nn.Module):
         # self-attention
         y = self.self_attn(
             self.norm1(x).float() * (1 + e[1].squeeze(2)) + e[0].squeeze(2),
-            seq_lens, grid_sizes, freqs, self_attention_map=self_attention_map)
+            seq_lens, grid_sizes, freqs, self_attention_map=self_attention_map,
+            sliding_window_config=sliding_window_config)
         with torch.amp.autocast('cuda', dtype=torch.float32):
             x = x + y * e[2].squeeze(2)
 
@@ -517,6 +525,7 @@ class WanModel(ModelMixin, ConfigMixin):
         y=None,
         cross_attn_q_token_idx=None,
         self_attention_map=None,
+        sliding_window_config=None,
     ):
         r"""
         Forward pass through the diffusion model
@@ -590,6 +599,7 @@ class WanModel(ModelMixin, ConfigMixin):
             context_lens=context_lens,
             cross_attn_q_token_idx=cross_attn_q_token_idx,
             self_attention_map=self_attention_map,
+            sliding_window_config=sliding_window_config,
         )
 
         for block in self.blocks:

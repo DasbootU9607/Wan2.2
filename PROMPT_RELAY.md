@@ -62,7 +62,8 @@ Repeated prompt text is mapped to each occurrence in order, including when the
 global prompt contains the same words. Prompts exceeding the T5 token budget are
 rejected instead of silently dropping a routed event. JSON uses UTF-8. Prompt
 extension must be disabled with Prompt Relay JSON, since it would change the
-text being routed. Omitting `--prompt_filepath` uses the baseline pipeline.
+text being routed. Omitting `--prompt_filepath` disables Prompt Relay; the
+sliding-window self-attention switch remains independent.
 Other Wan tasks are not connected to this JSON route.
 
 ## Attention
@@ -89,7 +90,9 @@ of columns have zero penalty simultaneously. They still share the same softmax;
 equal weights or successful realization of both events are not guaranteed.
 Outside each interval, attention decays smoothly rather than being hard blocked.
 Global tokens, special tokens, text padding and the unconditional CFG pass retain
-their previous routing behavior. Video self-attention is unchanged.
+their previous routing behavior. Video self-attention is unchanged by default;
+the optional [sliding-window mode](SLIDING_WINDOW.md) restricts video self-attention
+without changing these cross-attention timing rules.
 
 The routing kernel now stores temporal costs in float32 and matches the value
 tensor dtype during attention multiplication, including outside autocast. Small

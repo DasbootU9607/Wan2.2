@@ -18,6 +18,9 @@ import wan
 from wan.configs import MAX_AREA_CONFIGS, SIZE_CONFIGS, SUPPORTED_SIZES, WAN_CONFIGS
 from wan.distributed.util import init_distributed_group
 from wan.prompt_relay import build_prompt_text
+from wan.sliding_window import (
+    DEFAULT_WINDOW_LENGTH, DEFAULT_WINDOW_STRIDE, make_sliding_window_config,
+)
 from wan.utils.prompt_extend import DashScopePromptExpander, QwenPromptExpander
 from wan.utils.utils import merge_video_audio, save_video, str2bool
 
@@ -66,6 +69,10 @@ def _validate_args(args):
     assert args.task in WAN_CONFIGS, f"Unsupport task: {args.task}"
     assert args.task in EXAMPLE_PROMPT, f"Unsupport task: {args.task}"
 
+    make_sliding_window_config(args.sliding_window, args.window_length, args.window_stride)
+    if args.sliding_window and args.task != "t2v-A14B":
+        raise ValueError("Sliding-window inference is supported for t2v-A14B only.")
+
     if args.prompt_filepath is not None:
         if args.task != "t2v-A14B":
             raise ValueError("Prompt Relay JSON is supported for t2v-A14B only.")
@@ -111,7 +118,7 @@ def _validate_args(args):
             task], f"Unsupport size {args.size} for task {args.task}, supported sizes are: {', '.join(SUPPORTED_SIZES[args.task])}"
 
 
-def _parse_args():
+def _parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Generate a image or video from a text prompt or image using Wan"
     )
@@ -313,8 +320,20 @@ def _parse_args():
         default=80,
         help="Number of frames per clip, 48 or 80 or others (must be multiple of 4) for 14B s2v"
     )
-    args = parser.parse_args()
-    _validate_args(args)
+    parser.add_argument(
+        "--sliding_window", type=str2bool, nargs="?", const=True, default=False,
+        help="Enable temporal sliding-window self-attention for T2V-A14B; pass false/0 to disable.")
+    parser.add_argument(
+        "--window_length", type=int, default=DEFAULT_WINDOW_LENGTH,
+        help="Window length in internal latent frames, not output frames (default: 31).")
+    parser.add_argument(
+        "--window_stride", type=int, default=DEFAULT_WINDOW_STRIDE,
+        help="Stride in internal latent frames (default: 16); require 0 < stride <= window_length.")
+    args = parser.parse_args(argv)
+    try:
+        _validate_args(args)
+    except ValueError as error:
+        parser.error(str(error))
 
     return args
 
@@ -444,7 +463,10 @@ def generate(args):
             guide_scale=args.sample_guide_scale,
             seed=args.base_seed,
             offload_model=args.offload_model,
-            prompt_filepath = args.prompt_filepath)
+            prompt_filepath=args.prompt_filepath,
+            sliding_window=args.sliding_window,
+            window_length=args.window_length,
+            window_stride=args.window_stride)
     elif "ti2v" in args.task:
         logging.info("Creating WanTI2V pipeline.")
         wan_ti2v = wan.WanTI2V(

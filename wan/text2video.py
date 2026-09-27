@@ -25,6 +25,9 @@ from .modules.model import WanModel
 from .modules.t5 import T5EncoderModel
 from .modules.vae2_1 import Wan2_1_VAE
 from .prompt_relay import prepare_prompt_relay
+from .sliding_window import (
+    DEFAULT_WINDOW_LENGTH, DEFAULT_WINDOW_STRIDE, make_sliding_window_config,
+)
 from .utils.fm_solvers import (
     FlowDPMSolverMultistepScheduler,
     get_sampling_sigmas,
@@ -230,7 +233,10 @@ class WanT2V:
                  n_prompt="",
                  seed=-1,
                  offload_model=True,
-                 prompt_filepath=None):
+                 prompt_filepath=None,
+                 sliding_window=False,
+                 window_length=DEFAULT_WINDOW_LENGTH,
+                 window_stride=DEFAULT_WINDOW_STRIDE):
         r"""
         Generates video frames from text prompt using diffusion process.
 
@@ -260,6 +266,12 @@ class WanT2V:
             prompt_filepath (`str`, *optional*, defaults to None):
                 UTF-8 Prompt Relay JSON with local prompts and optional
                 segment_lengths or independent, possibly overlapping segment_intervals.
+            sliding_window (`bool`, *optional*, defaults to False):
+                Enable temporal sliding-window video self-attention in both CFG branches.
+            window_length (`int`, *optional*, defaults to 31):
+                Number of transformer latent frames per window, not output video frames.
+            window_stride (`int`, *optional*, defaults to 16):
+                Window stride in latent frames; require 0 < stride <= window_length.
 
         Returns:
             torch.Tensor:
@@ -270,6 +282,10 @@ class WanT2V:
                 - W: Frame width from size)
         """
 
+        window_config = make_sliding_window_config(sliding_window, window_length, window_stride)
+        if window_config is not None:
+            logging.info("Sliding-window self-attention: length=%s, stride=%s (internal latent frames)",
+                         window_length, window_stride)
         cross_attn_q_token_idx = None
         if prompt_filepath is not None:
             with open(prompt_filepath, 'r', encoding='utf-8') as f:
@@ -366,6 +382,9 @@ class WanT2V:
                 'cross_attn_q_token_idx': cross_attn_q_token_idx
             }
             arg_null = {'context': context_null, 'seq_len': seq_len}
+            if window_config is not None:
+                arg_c['sliding_window_config'] = window_config
+                arg_null['sliding_window_config'] = window_config
 
             for _, t in enumerate(tqdm(timesteps)):
                 latent_model_input = latents

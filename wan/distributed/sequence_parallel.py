@@ -71,6 +71,7 @@ def sp_dit_forward(
     y=None,
     cross_attn_q_token_idx=None,
     self_attention_map=None,
+    sliding_window_config=None,
 ):
     """
     x:              A list of videos each with shape [C, T, H, W].
@@ -138,6 +139,7 @@ def sp_dit_forward(
         context_lens=context_lens,
         cross_attn_q_token_idx=cross_attn_q_token_idx,
         self_attention_map=self_attention_map,
+        sliding_window_config=sliding_window_config,
     )
 
     for block in self.blocks:
@@ -154,7 +156,8 @@ def sp_dit_forward(
     return [u.float() for u in x]
 
 
-def sp_attn_forward(self, x, seq_lens, grid_sizes, freqs, dtype=torch.bfloat16):
+def sp_attn_forward(self, x, seq_lens, grid_sizes, freqs, dtype=torch.bfloat16,
+                    self_attention_map=None, sliding_window_config=None):
     b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
     half_dtypes = (torch.float16, torch.bfloat16)
 
@@ -178,6 +181,8 @@ def sp_attn_forward(self, x, seq_lens, grid_sizes, freqs, dtype=torch.bfloat16):
         half(v),
         seq_lens,
         window_size=self.window_size,
+        grid_sizes=grid_sizes,
+        sliding_window_config=sliding_window_config,
     )
 
     # output

@@ -195,7 +195,7 @@ example, assigning one event to `[0, 3)` seconds and another to `[2, 4)` seconds
 allows both prompts to guide the video during `[2, 3)`.
 
 Use the Wan submodule recorded by the
-[Prompt Relay overlap branch](https://github.com/GordonChen19/Prompt-Relay/tree/wan2.2-overlap-prompt-relay),
+[Prompt Relay overlap branch](https://github.com/GordonChen19/Prompt-Relay/tree/wan2.2-overlap-only),
 or the standalone
 [`feat/prompt-relay-overlap` branch](https://github.com/DasbootU9607/Wan2.2/tree/feat/prompt-relay-overlap).
 After installing dependencies and downloading the T2V-A14B weights, run:
@@ -213,6 +213,27 @@ from the text or support `auto_overlap`.
 
 See the [English guide](PROMPT_RELAY.md), [中文说明](PROMPT_RELAY_ZH.md), and
 [example JSON](prompt_relay_overlap.json) for the schema and timing options.
+
+##### (4) Temporal Sliding-Window Self-Attention
+
+For longer **T2V-A14B** generation, use the
+[`wan2.2-sliding-window` Prompt Relay branch](https://github.com/GordonChen19/Prompt-Relay/tree/wan2.2-sliding-window)
+or the standalone
+[`feat/prompt-relay-sliding-window` branch](https://github.com/DasbootU9607/Wan2.2/tree/feat/prompt-relay-sliding-window).
+After installing the usual dependencies and weights, run:
+
+```sh
+python generate.py --task t2v-A14B --ckpt_dir ./Wan2.2-T2V-A14B \
+  --size "832*480" --frame_num 241 --offload_model True --convert_model_dtype \
+  --prompt "A continuous wide shot of a hiker walking beside a lake, with a dog exploring nearby." \
+  --sliding_window --window_length 31 --window_stride 16
+```
+
+Window sizes use **internal latent frames**, not output frames. The feature is
+off by default; `--sliding_window false` disables it. Overlapping window outputs
+are averaged, while Prompt Relay keeps its original timeline. Add
+`--prompt_filepath your_schedule.json` to combine them. See the
+[sliding-window guide](SLIDING_WINDOW.md) for timing, validation, and limitations.
 
 #### Run Image-to-Video Generation
 

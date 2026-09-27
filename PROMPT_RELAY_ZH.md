@@ -59,9 +59,35 @@ Wan 这个分支仅接入手动指定重叠时间；没有移植 Hunyuan 的可�
 
 Attention 的基本公式仍然是 `softmax(QKᵀ / √d − 时间惩罚) V`。变化在于时间惩罚可以同时容纳多段有效时间。多句话仍共享同一个 softmax，权重不一定相同，也不是给各句话单独生成一个物体。
 
-该入口用于 `t2v-A14B`，暂未接入其他 Wan 任务。使用提示词 JSON 时请关闭 `--use_prompt_extend`。不传 `--prompt_filepath` 则使用原来的基础生成流程。
+该入口用于 `t2v-A14B`，暂未接入其他 Wan 任务。使用提示词 JSON 时请关闭 `--use_prompt_extend`。不传 `--prompt_filepath` 则不启用 Prompt Relay；视频自注意力的滑动窗口开关独立控制。
 
 ## 已有验证与边界
+
+### 与 sliding window 一起使用
+
+在 `feat/prompt-relay-sliding-window` 分支中，T2V-A14B 还可以开启视频自注意力滑动窗口：
+
+```bash
+python generate.py --task t2v-A14B --ckpt_dir /path/to/Wan2.2-T2V-A14B \
+  --size "832*480" --frame_num 81 --offload_model True --convert_model_dtype \
+  --prompt_filepath prompt_relay_overlap.json \
+  --sliding_window --window_length 12 --window_stride 6
+```
+
+Prompt Relay 管“每个时间段看哪句话”，滑动窗口管“每帧能看附近哪些视频帧”。
+两者可以同时使用，提示词时间不会在每个窗口重新从零开始。窗口重叠处的输出取平均。
+
+三个参数分别是开关、窗口长度、滑动步长。长度和步长按**内部 latent 帧**计数；
+默认是关闭、31、16。`--sliding_window false` 可以显式关闭。
+81 个输出帧对应 21 个内部帧，因此默认长度 31 会覆盖整段视频；上面的 12/6 才会实际分窗。
+更长视频可以使用 `--frame_num 241`，其内部长度为 61 帧，并根据完整视频时长设置提示词区间。
+要求 `0 < window_stride <= window_length`，避免出现无人覆盖的帧。
+
+滑动窗口不等于无限延长视频：完整 latent、模型权重和 VAE 解码仍占显存，
+较远时间点之间的直接联系也会减弱。完整出片效果、显存和速度需要用实际模型权重对比。
+详见 [滑动窗口说明与验证步骤](SLIDING_WINDOW.md)。
+
+### Overlapping 回归测试
 
 ```bash
 python -m unittest discover -s tests -p test_prompt_relay.py -v

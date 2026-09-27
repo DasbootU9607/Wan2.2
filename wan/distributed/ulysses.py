@@ -3,6 +3,7 @@ import torch
 import torch.distributed as dist
 
 from ..modules.attention import flash_attention
+from ..modules.sliding_window import sliding_window_attention
 from .util import all_to_all
 
 
@@ -12,6 +13,8 @@ def distributed_attention(
         v,
         seq_lens,
         window_size=(-1, -1),
+        grid_sizes=None,
+        sliding_window_config=None,
 ):
     """
     Performs distributed attention based on DeepSpeed Ulysses attention mechanism.
@@ -34,13 +37,18 @@ def distributed_attention(
     v = all_to_all(v, scatter_dim=2, gather_dim=1)
 
     # apply attention
-    x = flash_attention(
-        q,
-        k,
-        v,
-        k_lens=seq_lens,
-        window_size=window_size,
-    )
+    if sliding_window_config is not None:
+        if tuple(window_size) != (-1, -1):
+            raise ValueError("Temporal windows cannot be combined with token-local window_size.")
+        x = sliding_window_attention(q, k, v, seq_lens, grid_sizes, sliding_window_config)
+    else:
+        x = flash_attention(
+            q,
+            k,
+            v,
+            k_lens=seq_lens,
+            window_size=window_size,
+        )
 
     # scatter q/k/v sequence
     x = all_to_all(x, scatter_dim=1, gather_dim=2)
